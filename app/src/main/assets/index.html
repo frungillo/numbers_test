@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Basket Coach Board</title>
+<style>
+:root{--bg:#0b1220;--panel:#111827;--line:#334155;--text:#f8fafc;--muted:#94a3b8;--accent:#f59e0b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}button,input,textarea{font:inherit}button{border:1px solid var(--line);background:#172033;color:var(--text);border-radius:10px;padding:9px 11px;min-height:40px}button.active{outline:2px solid var(--accent);background:#2a2617}.app{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.top{display:flex;gap:7px;align-items:center;padding:7px;background:#0f172a;border-bottom:1px solid var(--line)}.top strong{white-space:nowrap}.title{flex:1;min-width:90px;background:#0b1220;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px}.tools{display:flex;gap:6px;padding:7px;background:var(--panel);overflow-x:auto;border-bottom:1px solid var(--line)}.tools button{white-space:nowrap;min-width:max-content}.work{min-height:0;display:grid;grid-template-columns:1fr 265px}.viewport{overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:7px;touch-action:pan-x pan-y;background:radial-gradient(circle at 50% 0,#1e293b 0,#0b1220 65%)}.board{width:min(100%,640px);aspect-ratio:2/3;touch-action:none;user-select:none}.side{border-left:1px solid var(--line);padding:9px;background:#0f172a;overflow:auto}.side h3{font-size:12px;text-transform:uppercase;color:#cbd5e1}.row{display:flex;gap:6px;flex-wrap:wrap}.row button{flex:1}.steps{display:flex;gap:6px;align-items:center}.steps span{flex:1;text-align:center;background:#0b1220;padding:9px;border:1px solid var(--line);border-radius:9px}.notes{width:100%;min-height:90px;background:#0b1220;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px}.status{display:flex;justify-content:space-between;padding:6px 9px;background:#0f172a;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.court{fill:#c98f4c}.courtline{fill:none;stroke:#fff8e7;stroke-width:4}.paint{fill:#9f6a36;opacity:.35}.player text{fill:white;font-weight:800;text-anchor:middle;dominant-baseline:middle;pointer-events:none}.sel{fill:none;stroke:#fde68a;stroke-width:4;stroke-dasharray:8 5;pointer-events:none}.move{stroke:#111827;stroke-width:7;fill:none;stroke-linecap:round;marker-end:url(#arrow)}.pass{stroke:#111827;stroke-width:6;fill:none;stroke-dasharray:15 10;stroke-linecap:round;marker-end:url(#arrow)}.screen{stroke:#111827;stroke-width:8;fill:none;stroke-linecap:round}.temp{stroke:white;stroke-width:5;stroke-dasharray:7 7}.ball{fill:#f97316;stroke:#111827;stroke-width:2}
+@media(max-width:800px){.work{grid-template-columns:1fr}.side{display:none}.top strong{font-size:13px}.tools button{min-height:38px;padding:8px 10px}.viewport{padding:3px}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="top"><strong>🏀 Coach Board</strong><input id="title" class="title" value="Nuovo schema"><button id="save">Salva</button></div>
+<div class="tools" id="tools">
+<button data-tool="select" class="active">↖ Seleziona</button>
+<button data-tool="offense">● Attacco</button>
+<button data-tool="defense">● Difesa</button>
+<button data-tool="ball">🏀 Palla</button>
+<button data-tool="move">➜ Movimento</button>
+<button data-tool="pass">⇢ Passaggio</button>
+<button data-tool="screen">⊣ Blocco</button>
+<button data-tool="erase">⌫ Cancella</button>
+</div>
+<div class="work">
+<div class="viewport"><svg id="svg" class="board" viewBox="0 0 600 900">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#111827"/></marker></defs>
+<g id="court"></g><g id="lines"></g><g id="objs"></g><g id="temp"></g>
+</svg></div>
+<aside class="side">
+<h3>Modifica</h3><div class="row"><button id="undo">↶</button><button id="redo">↷</button><button id="del">Elimina</button><button id="clear">Pulisci</button></div>
+<h3>Step</h3><div class="steps"><button id="prev">‹</button><span><b id="stepNo">1</b> / <b id="stepCount">1</b></span><button id="next">›</button></div>
+<div class="row" style="margin-top:6px"><button id="newStep">Nuovo</button><button id="dupStep">Duplica</button><button id="delStep">Elimina</button></div>
+<h3>Note</h3><textarea id="notes" class="notes" placeholder="Letture, timing, obiettivi..."></textarea>
+<h3>Archivio locale</h3><div class="row"><button id="load">Carica ultimo</button><button id="newPlay">Nuovo schema</button></div>
+</aside>
+</div>
+<div class="status"><span id="status">Modalità seleziona</span><span id="auto">Salvataggio locale attivo</span></div>
+</div>
+<script>
+(function(){
+'use strict';
+var NS='http://www.w3.org/2000/svg',KEY='basketCoachBoard.native.v1';
+var svg=document.getElementById('svg'),court=document.getElementById('court'),lines=document.getElementById('lines'),objs=document.getElementById('objs'),temp=document.getElementById('temp');
+var mode='select',selected=null,drag=null,drawStart=null,history=[],hi=-1;
+function id(p){return p+'_'+Math.random().toString(36).slice(2,9)}
+function fresh(){return{title:'Nuovo schema',notes:'',step:0,steps:[{objects:[],lines:[]}]}}
+var state=fresh();
+function st(){return state.steps[state.step]}
+function clone(x){return JSON.parse(JSON.stringify(x))}
+function E(tag,a){var e=document.createElementNS(NS,tag);Object.keys(a||{}).forEach(function(k){e.setAttribute(k,a[k])});return e}
+function point(ev){var p=svg.createSVGPoint();p.x=ev.clientX;p.y=ev.clientY;var q=p.matrixTransform(svg.getScreenCTM().inverse());return{x:Math.max(20,Math.min(580,q.x)),y:Math.max(20,Math.min(880,q.y))}}
+function saveLocal(){state.title=document.getElementById('title').value||'Nuovo schema';state.notes=document.getElementById('notes').value;localStorage.setItem(KEY,JSON.stringify(state))}
+function snap(){var s=JSON.stringify(state);history=history.slice(0,hi+1);if(history[history.length-1]!==s){history.push(s);if(history.length>60)history.shift();hi=history.length-1}saveLocal();buttons()}
+function restore(i){if(i<0||i>=history.length)return;state=JSON.parse(history[i]);hi=i;sync();render();buttons();saveLocal()}
+function buttons(){document.getElementById('undo').disabled=hi<=0;document.getElementById('redo').disabled=hi>=history.length-1}
+function sync(){document.getElementById('title').value=state.title;document.getElementById('notes').value=state.notes||'';document.getElementById('stepNo').textContent=state.step+1;document.getElementById('stepCount').textContent=state.steps.length}
+function drawCourt(){court.innerHTML='';court.appendChild(E('rect',{x:5,y:5,width:590,height:890,rx:12,class:'court'}));court.appendChild(E('rect',{x:5,y:5,width:590,height:890,rx:12,class:'courtline'}));court.appendChild(E('line',{x1:5,y1:450,x2:595,y2:450,class:'courtline'}));court.appendChild(E('circle',{cx:300,cy:450,r:70,class:'courtline'}));court.appendChild(E('rect',{x:205,y:5,width:190,height:190,class:'paint'}));court.appendChild(E('rect',{x:205,y:705,width:190,height:190,class:'paint'}));court.appendChild(E('rect',{x:205,y:5,width:190,height:190,class:'courtline'}));court.appendChild(E('rect',{x:205,y:705,width:190,height:190,class:'courtline'}));court.appendChild(E('circle',{cx:300,cy:195,r:70,class:'courtline'}));court.appendChild(E('circle',{cx:300,cy:705,r:70,class:'courtline'}));court.appendChild(E('line',{x1:260,y1:70,x2:340,y2:70,class:'courtline'}));court.appendChild(E('line',{x1:260,y1:830,x2:340,y2:830,class:'courtline'}));court.appendChild(E('circle',{cx:300,cy:90,r:9,class:'courtline'}));court.appendChild(E('circle',{cx:300,cy:810,r:9,class:'courtline'}));court.appendChild(E('path',{d:'M105 5 L105 105 A220 220 0 0 0 495 105 L495 5',class:'courtline'}));court.appendChild(E('path',{d:'M105 895 L105 795 A220 220 0 0 1 495 795 L495 895',class:'courtline'}))}
+function render(){drawCourt();lines.innerHTML='';objs.innerHTML='';temp.innerHTML='';st().lines.forEach(renderLine);st().objects.forEach(renderObj);sync()}
+function renderLine(l){var g=E('g',{'data-id':l.id});g.appendChild(E('line',{x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,class:l.type}));if(selected===l.id)g.appendChild(E('circle',{cx:(l.x1+l.x2)/2,cy:(l.y1+l.y2)/2,r:13,class:'sel'}));g.addEventListener('pointerdown',function(e){e.stopPropagation();if(mode==='erase'){remove(l.id);return}selected=l.id;render()});lines.appendChild(g)}
+function renderObj(o){var g=E('g',{'data-id':o.id,class:'player'});if(o.type==='ball'){g.appendChild(E('circle',{cx:o.x,cy:o.y,r:13,class:'ball'}))}else{var col=o.type==='offense'?'#2563eb':'#dc2626';g.appendChild(E('circle',{cx:o.x,cy:o.y,r:24,fill:col,stroke:'#111827','stroke-width':2}));var t=E('text',{x:o.x,y:o.y+1,'font-size':18});t.textContent=o.type==='offense'?o.num:'X'+o.num;g.appendChild(t)}if(selected===o.id)g.appendChild(E('circle',{cx:o.x,cy:o.y,r:31,class:'sel'}));g.addEventListener('pointerdown',function(e){e.stopPropagation();if(mode==='erase'){remove(o.id);return}selected=o.id;if(mode==='select'){drag={id:o.id,pid:e.pointerId};svg.setPointerCapture(e.pointerId)}render()});objs.appendChild(g)}
+function add(type,p){var n=st().objects.filter(function(x){return x.type===type}).length+1;st().objects.push({id:id('o'),type:type,x:p.x,y:p.y,num:n});selected=st().objects[st().objects.length-1].id;snap();render()}
+function remove(i){var s=st();s.objects=s.objects.filter(function(x){return x.id!==i});s.lines=s.lines.filter(function(x){return x.id!==i});if(selected===i)selected=null;snap();render()}
+function objectById(i){return st().objects.find(function(x){return x.id===i})}
+function setMode(m){mode=m;document.querySelectorAll('[data-tool]').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tool')===m)});document.getElementById('status').textContent='Modalità '+m}
+document.getElementById('tools').addEventListener('click',function(e){var b=e.target.closest('[data-tool]');if(b)setMode(b.getAttribute('data-tool'))});
+svg.addEventListener('pointerdown',function(e){if(e.target.closest('[data-id]'))return;var p=point(e);if(mode==='offense'||mode==='defense'||mode==='ball'){add(mode,p);return}if(mode==='select'){selected=null;render();return}if(mode==='move'||mode==='pass'||mode==='screen'){drawStart=p;svg.setPointerCapture(e.pointerId);temp.innerHTML='';temp.appendChild(E('line',{x1:p.x,y1:p.y,x2:p.x,y2:p.y,class:'temp'}))}});
+svg.addEventListener('pointermove',function(e){var p=point(e);if(drag){var o=objectById(drag.id);if(o){o.x=p.x;o.y=p.y;render()}}else if(drawStart){var l=temp.querySelector('line');if(l){l.setAttribute('x2',p.x);l.setAttribute('y2',p.y)}}});
+svg.addEventListener('pointerup',function(e){var p=point(e);if(drag){drag=null;snap();render();return}if(drawStart){if(Math.hypot(p.x-drawStart.x,p.y-drawStart.y)>15){st().lines.push({id:id('l'),type:mode,x1:drawStart.x,y1:drawStart.y,x2:p.x,y2:p.y});selected=st().lines[st().lines.length-1].id;snap()}drawStart=null;render()}});
+document.getElementById('undo').onclick=function(){restore(hi-1)};document.getElementById('redo').onclick=function(){restore(hi+1)};document.getElementById('del').onclick=function(){if(selected)remove(selected)};document.getElementById('clear').onclick=function(){if(confirm('Pulire lo step corrente?')){st().objects=[];st().lines=[];selected=null;snap();render()}};
+document.getElementById('prev').onclick=function(){state.step=Math.max(0,state.step-1);selected=null;render();saveLocal()};document.getElementById('next').onclick=function(){state.step=Math.min(state.steps.length-1,state.step+1);selected=null;render();saveLocal()};
+document.getElementById('newStep').onclick=function(){state.steps.splice(state.step+1,0,{objects:[],lines:[]});state.step++;selected=null;snap();render()};
+document.getElementById('dupStep').onclick=function(){var s=clone(st());s.objects.forEach(function(x){x.id=id('o')});s.lines.forEach(function(x){x.id=id('l')});state.steps.splice(state.step+1,0,s);state.step++;selected=null;snap();render()};
+document.getElementById('delStep').onclick=function(){if(state.steps.length===1){st().objects=[];st().lines=[]}else{state.steps.splice(state.step,1);state.step=Math.max(0,state.step-1)}selected=null;snap();render()};
+document.getElementById('save').onclick=function(){saveLocal();document.getElementById('status').textContent='Schema salvato'};
+document.getElementById('load').onclick=function(){try{var r=localStorage.getItem(KEY);if(r){state=JSON.parse(r);selected=null;history=[];hi=-1;snap();render()}}catch(x){}};
+document.getElementById('newPlay').onclick=function(){if(confirm('Creare un nuovo schema?')){state=fresh();selected=null;history=[];hi=-1;snap();render()}};
+document.getElementById('title').addEventListener('input',function(){state.title=this.value;saveLocal()});document.getElementById('notes').addEventListener('input',function(){state.notes=this.value;saveLocal()});
+try{var saved=localStorage.getItem(KEY);if(saved)state=JSON.parse(saved)}catch(e){}if(!state.steps||!state.steps.length)state=fresh();state.step=Math.max(0,Math.min(state.step||0,state.steps.length-1));sync();snap();render();
+})();
+</script>
+</body>
+</html>

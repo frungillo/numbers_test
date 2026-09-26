@@ -1,0 +1,39 @@
+name: Build Basket Coach Studio Android v16 Mobile
+
+on:
+  push:
+    branches:
+      - basket-coach-studio-android-v16-mobile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore project
+        run: |
+          mkdir buildproj
+          cat v16/part00 v16/part01 v16/part02 v16/part03 v16/part04 | base64 -d > project.zip
+          unzip -q project.zip -d buildproj
+      - name: Build APK
+        working-directory: buildproj
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BasketCoachStudio-Android-v16-Mobile
+          path: buildproj/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

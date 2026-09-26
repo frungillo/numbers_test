@@ -32,7 +32,7 @@ jobs:
       - name: Restore project
         run: |
           mkdir buildproj
-          base64 -d basketcoach_project.zip.b64 > project.zip
+          cat chunks/part00 chunks/part01 chunks/part02 chunks/part03 chunks/part04 chunks/part05 chunks/part06 | base64 -d > project.zip
           unzip -q project.zip -d buildproj
 
       - name: Build debug APK

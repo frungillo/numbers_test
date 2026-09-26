@@ -1,0 +1,201 @@
+name: Build Basket Coach Studio Android v17 Property Dock
+
+on:
+  push:
+    branches:
+      - basket-coach-studio-android-v17-propdock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Restore v16 project
+        run: |
+          mkdir buildproj
+          cat v16/part00 v16/part01 v16/part02 v16/part03 v16/part04 | base64 -d > project.zip
+          unzip -q project.zip -d buildproj
+
+      - name: Apply v17 mobile property dock
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('buildproj/app/src/main/assets/index.html')
+          s=p.read_text(encoding='utf-8')
+
+          s=s.replace('    <button id="mobilePropsBtn">⚙ Proprietà</button>\n','')
+          s=s.replace('  <button class="tool" data-tool="pan">✋<br>Sposta</button>\n','')
+          s=s.replace("select:'Seleziona',pan:'Sposta campo',player:'Attaccante'","select:'Seleziona',player:'Attaccante'")
+          s=s.replace(" if(state.tool==='pan'){const wrap=document.getElementById('canvasWrap');state.dragging=true;mobileUI.panStart={x:e.clientX,y:e.clientY,left:wrap.scrollLeft,top:wrap.scrollTop};return}\n","")
+          s=s.replace(" if(state.tool==='pan'&&mobileUI.panStart){const wrap=document.getElementById('canvasWrap');wrap.scrollLeft=mobileUI.panStart.left-(e.clientX-mobileUI.panStart.x);wrap.scrollTop=mobileUI.panStart.top-(e.clientY-mobileUI.panStart.y);return}\n","")
+          s=s.replace("canvas.addEventListener('pointerup',e=>{if(state.tool==='pan'){state.dragging=false;mobileUI.panStart=null;return}if(state.tool==='select')","canvas.addEventListener('pointerup',e=>{if(state.tool==='select')")
+          s=s.replace("document.getElementById('mobilePropsBtn')?.addEventListener('click',()=>openMobilePanel('.rightbar','noSelection'));\n","")
+
+          css = r'''
+              .mobilePropDock{position:fixed;left:0;right:0;bottom:68px;height:106px;z-index:49;display:none;background:#191d21f7;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px 7px;overflow:hidden}
+              .mobilePropDock.show{display:block}
+              .mobilePropScroll{height:100%;display:flex;align-items:stretch;gap:7px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding-bottom:2px}
+              .mobilePropScroll::-webkit-scrollbar{display:none}
+              .mPropCell{flex:0 0 94px;min-width:94px;background:#11161a;border:1px solid #343d46;border-radius:9px;padding:5px 6px;display:flex;flex-direction:column;justify-content:center;gap:3px}
+              .mPropCell.wide{flex-basis:145px;min-width:145px}
+              .mPropCell.actions{flex-basis:176px;min-width:176px;display:grid;grid-template-columns:1fr 1fr;gap:5px;align-content:center}
+              .mPropCell .mLabel{font-size:10px;color:#aab4c0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+              .mPropCell input[type=text],.mPropCell select{height:32px;min-height:32px;font-size:13px;padding:4px 6px}
+              .mPropCell input[type=color]{height:32px;min-height:32px;padding:2px}
+              .mPropCell input[type=range]{height:24px;margin:0}
+              .mPropCell .mCheck{display:flex;align-items:center;gap:5px;font-size:11px;color:#e6ebf0;white-space:nowrap;margin:0}
+              .mPropCell.actions button{min-height:36px;height:36px;font-size:11px;padding:3px 5px}
+              body.mobilePropsVisible .canvasWrap{bottom:174px}
+              body.mobilePropsVisible .mobileFabZoom{bottom:184px}
+          '''
+          s=s.replace('    .mobileFabZoom{position:fixed;right:8px;bottom:78px;', css+'\n    .mobileFabZoom{position:fixed;right:8px;bottom:78px;')
+
+          landscape = r'''
+              .mobilePropDock{bottom:62px;height:94px}
+              body.mobilePropsVisible .canvasWrap{bottom:156px}
+              body.mobilePropsVisible .mobileFabZoom{bottom:166px}
+          '''
+          s=s.replace('    .mobileFabZoom{bottom:70px}\n', '    .mobileFabZoom{bottom:70px}\n'+landscape+'\n')
+
+          dock = r'''
+          <div class="mobilePropDock mobileOnly" id="mobilePropDock">
+            <div class="mobilePropScroll">
+              <div class="mPropCell wide"><div class="mLabel">Etichetta / testo</div><input id="mPropLabel" type="text"></div>
+              <div class="mPropCell"><div class="mLabel">Colore</div><input id="mPropColor" type="color"></div>
+              <div class="mPropCell"><div class="mLabel">Riempimento</div><input id="mPropFill" type="color"></div>
+              <div class="mPropCell wide"><div class="mLabel">Spessore <span id="mWidthValue"></span></div><input id="mPropWidth" type="range" min="1" max="14" step="1"></div>
+              <div class="mPropCell wide"><div class="mLabel">Dimensione <span id="mSizeValue"></span></div><input id="mPropSize" type="range" min="12" max="70" step="1"></div>
+              <div class="mPropCell wide"><div class="mLabel">Stile linea</div><select id="mPropDash"><option value="solid">Continua</option><option value="dashed">Tratteggiata</option><option value="dotted">Puntinata</option></select></div>
+              <div class="mPropCell"><label class="mCheck"><input type="checkbox" id="mPropArrow"> Freccia</label><label class="mCheck"><input type="checkbox" id="mPropCurve"> Curvo</label></div>
+              <div class="mPropCell wide"><div class="mLabel">Curvatura <span id="mCurveValue">0</span></div><input id="mPropCurvature" type="range" min="-220" max="220" step="5" value="0"></div>
+              <div class="mPropCell actions"><button id="mBringFront">Avanti</button><button id="mSendBack">Dietro</button><button id="mDuplicateSel">Duplica</button><button id="mDeleteSel" class="danger">Elimina</button></div>
+            </div>
+          </div>
+          '''
+          s=s.replace('<div class="mobileToolstrip mobileOnly" id="mobileToolstrip">', dock+'\n<div class="mobileToolstrip mobileOnly" id="mobileToolstrip">')
+
+          js = r'''
+          const _desktopSyncProps = syncProps;
+          syncProps = function(){
+            _desktopSyncProps();
+            const dock=document.getElementById('mobilePropDock');
+            const i=state.selected;
+            if(!isMobile() || i==null || !current().objects[i]){
+              dock?.classList.remove('show');
+              document.body.classList.remove('mobilePropsVisible');
+              return;
+            }
+            const o=current().objects[i], path=isPathObject(o);
+            mPropLabel.value=o.label||'';
+            mPropColor.value=toHex(o.color||'#111111');
+            mPropFill.value=toHex(o.fill||o.color||'#ffffff');
+            mPropWidth.value=o.width||4; mWidthValue.textContent=mPropWidth.value;
+            mPropSize.value=o.size||28; mSizeValue.textContent=mPropSize.value;
+            mPropDash.value=o.dash||'solid';
+            mPropArrow.checked=o.arrow!==false;
+            mPropCurve.checked=path&&(o.curve||o.type==='curve');
+            mPropCurve.disabled=!path;
+            mPropCurvature.value=o.curvature!=null?o.curvature:(o.type==='curve'?80:0);
+            mPropCurvature.disabled=!path||!(o.curve||o.type==='curve');
+            mCurveValue.textContent=mPropCurvature.value;
+            dock.classList.add('show');
+            document.body.classList.add('mobilePropsVisible');
+          };
+
+          function updateSelectedFromMobile(){
+            if(state.selected==null)return;
+            const o=current().objects[state.selected];
+            o.label=mPropLabel.value;
+            o.color=mPropColor.value;
+            o.fill=mPropFill.value;
+            o.width=+mPropWidth.value;
+            o.size=+mPropSize.value;
+            o.dash=mPropDash.value;
+            o.arrow=mPropArrow.checked;
+            mWidthValue.textContent=o.width;
+            mSizeValue.textContent=o.size;
+            propLabel.value=o.label; propColor.value=o.color; propFill.value=o.fill;
+            propWidth.value=o.width; widthValue.textContent=o.width;
+            propSize.value=o.size; sizeValue.textContent=o.size;
+            propDash.value=o.dash; propArrow.checked=o.arrow;
+            render();
+          }
+          ['mPropLabel','mPropColor','mPropFill','mPropWidth','mPropSize','mPropDash','mPropArrow'].forEach(id=>document.getElementById(id)?.addEventListener('input',updateSelectedFromMobile));
+
+          document.getElementById('mPropCurve')?.addEventListener('input',()=>{
+            if(state.selected==null)return;
+            const o=current().objects[state.selected];
+            if(!isPathObject(o))return;
+            commit();
+            o.curve=mPropCurve.checked;
+            if(o.type==='curve'&&!o.curve)o.type='arrow';
+            if(o.curve&&(!o.curvature||Math.abs(o.curvature)<5))o.curvature=80;
+            o.cx=null;o.cy=null;
+            if(o.curve)applyCurveControl(o);
+            syncProps();render();
+          });
+
+          document.getElementById('mPropCurvature')?.addEventListener('input',()=>{
+            if(state.selected==null)return;
+            const o=current().objects[state.selected];
+            if(!isPathObject(o))return;
+            o.curve=true;
+            o.curvature=+mPropCurvature.value;
+            o.cx=null;o.cy=null;
+            applyCurveControl(o);
+            mCurveValue.textContent=o.curvature;
+            mPropCurve.checked=true;
+            propCurve.checked=true;
+            propCurvature.value=o.curvature;
+            curveValue.textContent=o.curvature;
+            render();
+          });
+
+          document.getElementById('mBringFront')?.addEventListener('click',()=>document.getElementById('bringFront')?.click());
+          document.getElementById('mSendBack')?.addEventListener('click',()=>document.getElementById('sendBack')?.click());
+          document.getElementById('mDuplicateSel')?.addEventListener('click',()=>document.getElementById('duplicateSel')?.click());
+          document.getElementById('mDeleteSel')?.addEventListener('click',()=>document.getElementById('deleteSel')?.click());
+          '''
+          s=s.replace('syncAll();render();', js+'\nsyncAll();render();')
+
+          p.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Check JavaScript
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          h=Path('buildproj/app/src/main/assets/index.html').read_text()
+          assert 'Sposta' not in h
+          assert 'mobilePropsBtn' not in h
+          assert 'mobilePropDock' in h
+          print('HTML mobile v17 patch OK')
+          PY
+
+      - name: Build APK
+        working-directory: buildproj
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BasketCoachStudio-Android-v17-PropertyDock
+          path: buildproj/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,101 @@
+name: Build Basket Coach Studio standalone no-dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - basket-coach-studio-standalone-bundled-chromium
+    paths:
+      - 'standalone_src/**'
+      - '.github/workflows/build-bcs-standalone-nodeps.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Restore application source
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem standalone_src\part* | Sort-Object Name
+          $b64 = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          [IO.File]::WriteAllBytes('source.zip',[Convert]::FromBase64String($b64))
+          Expand-Archive source.zip -DestinationPath appsrc -Force
+
+      - name: Build Windows launcher
+        shell: pwsh
+        working-directory: appsrc
+        run: |
+          New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
+          go build -ldflags="-H=windowsgui -s -w" -o ..\dist\BasketCoachStudio.exe .
+          if (-not (Test-Path ..\dist\BasketCoachStudio.exe)) { throw "Launcher build failed" }
+
+      - name: Download bundled Chromium runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rev = (Invoke-WebRequest -UseBasicParsing "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/LAST_CHANGE").Content.Trim()
+          $url = "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/$rev/chrome-win.zip"
+          Write-Host "Bundling Chromium revision $rev"
+          Invoke-WebRequest -UseBasicParsing $url -OutFile chromium.zip
+          Expand-Archive chromium.zip -DestinationPath chromium -Force
+          $src = Get-ChildItem chromium -Directory | Select-Object -First 1
+          if (-not $src) { throw "Chromium folder not found" }
+          New-Item -ItemType Directory -Force -Path dist\runtime | Out-Null
+          Copy-Item "$($src.FullName)\*" dist\runtime -Recurse -Force
+          Remove-Item dist\runtime\interactive_ui_tests.exe -Force -ErrorAction SilentlyContinue
+          Set-Content -Path dist\runtime\CHROMIUM_REVISION.txt -Value $rev -Encoding ASCII
+          if (-not (Test-Path dist\runtime\chrome.exe)) { throw "Bundled chrome.exe missing" }
+          if (-not (Test-Path dist\runtime\chrome.dll)) { throw "Bundled chrome.dll missing" }
+
+      - name: Add documentation
+        shell: pwsh
+        run: |
+          Copy-Item appsrc\README_STANDALONE.txt dist\README.txt
+          New-Item -ItemType Directory -Force -Path dist\licenses | Out-Null
+          @'
+          CHROMIUM NOTICE
+          ===============
+          This portable distribution includes Chromium so Basket Coach Studio can run without
+          Microsoft Edge, WebView2, Chrome, .NET, Java, Node.js, or an Internet connection.
+
+          Chromium is open-source software.
+          Project: https://www.chromium.org/
+          License: https://chromium.googlesource.com/chromium/src/+/main/LICENSE
+
+          The Chromium runtime contains third-party open-source components governed by their
+          respective licenses.
+          '@ | Set-Content dist\licenses\CHROMIUM_NOTICE.txt -Encoding UTF8
+          $rev = Get-Content dist\runtime\CHROMIUM_REVISION.txt -Raw
+          @"
+          Basket Coach Studio 1.0.0 Standalone Win64
+          Bundled Chromium revision: $($rev.Trim())
+          No external runtime dependency.
+          "@ | Set-Content dist\VERSION.txt -Encoding UTF8
+
+      - name: Verify portable package
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist\BasketCoachStudio.exe)) { throw "BasketCoachStudio.exe missing" }
+          if (-not (Test-Path dist\runtime\chrome.exe)) { throw "chrome.exe missing" }
+          if (-not (Test-Path dist\runtime\chrome.dll)) { throw "chrome.dll missing" }
+          if (-not (Test-Path dist\runtime\locales\en-US.pak)) { throw "locale missing" }
+          Get-ChildItem dist\BasketCoachStudio.exe,dist\runtime\chrome.exe,dist\runtime\chrome.dll | Select-Object Name,Length
+
+      - name: Upload standalone package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BasketCoachStudio-Standalone-NoDependencies-Win64
+          path: dist/**
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7

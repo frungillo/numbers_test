@@ -1,0 +1,41 @@
+name: Build bundled Chromium runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - basket-coach-studio-standalone-bundled-chromium
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download latest Chromium snapshot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rev = (Invoke-WebRequest -UseBasicParsing "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/LAST_CHANGE").Content.Trim()
+          Write-Host "Chromium revision: $rev"
+          $url = "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/$rev/chrome-win.zip"
+          Invoke-WebRequest -UseBasicParsing $url -OutFile chromium.zip
+          Expand-Archive chromium.zip -DestinationPath extracted -Force
+          $src = Get-ChildItem extracted -Directory | Select-Object -First 1
+          if (-not $src) { throw "Chromium folder not found" }
+          New-Item -ItemType Directory -Force -Path runtime | Out-Null
+          Copy-Item "$($src.FullName)\*" runtime -Recurse -Force
+          Set-Content -Path runtime\CHROMIUM_REVISION.txt -Value $rev -Encoding ASCII
+          if (-not (Test-Path runtime\chrome.exe)) { throw "chrome.exe not found" }
+          Get-ChildItem runtime | Select-Object Name,Length
+
+      - name: Upload runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: BasketCoachStudio-Chromium-Win64
+          path: runtime
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7

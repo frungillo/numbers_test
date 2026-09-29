@@ -1,0 +1,21 @@
+name: Check standalone source chunks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - basket-coach-studio-standalone-bundled-chromium
+    paths:
+      - '.github/workflows/check-standalone-chunks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SHA256 chunks
+        run: |
+          sha256sum standalone_src/part* | sort -k2

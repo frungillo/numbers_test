@@ -38,7 +38,7 @@ jobs:
           $p='native\src\app.h'
           $s=Get-Content $p -Raw
           if ($s -notmatch 'NOMINMAX') {
-            $s=$s -replace [regex]::Escape("#pragma once`r`n"), "#pragma once`r`n#ifndef NOMINMAX`r`n#define NOMINMAX`r`n#endif`r`n"
+            $s="#ifndef NOMINMAX`r`n#define NOMINMAX`r`n#endif`r`n"+$s
           }
           if ($s -notmatch '#include <windowsx.h>') { $s=$s -replace '#include <windows.h>', "#include <windows.h>`r`n#include <windowsx.h>" }
           foreach($inc in @('cstring','locale','iterator')) {
@@ -53,8 +53,24 @@ jobs:
           $s=$s.Replace('case WM_CREATE:CreateControls(w);return 0;','case WM_CREATE:g.hwnd=w;CreateControls(w);return 0;')
           Set-Content $p $s -Encoding UTF8
 
+          $p='native\src\drawing.cpp'
+          $s=Get-Content $p -Raw
+          $s=$s.Replace('Font small(&ff,base*.52f,FontStyleBold,UnitPixel);gr.DrawString(L"C",-1,&small,','Font fontSmall(&ff,base*.52f,FontStyleBold,UnitPixel);gr.DrawString(L"C",-1,&fontSmall,')
+          $s=$s.Replace('bool curved=o.curve||o.type==ObjType::CurveArrow;','bool curved=o.curve;')
+          $s=$s.Replace('Font small(&ff,11,FontStyleRegular,UnitPixel);','Font fontSmall(&ff,11,FontStyleRegular,UnitPixel);')
+          $s=$s.Replace('&small,PointF((REAL)cr.right-430','&fontSmall,PointF((REAL)cr.right-430')
+          Set-Content $p $s -Encoding UTF8
+
+          $p='native\src\splash.cpp'
+          $s=Get-Content $p -Raw
+          $s=$s.Replace('HFONT small=CreateFontW(','HFONT fontSmall=CreateFontW(')
+          $s=$s.Replace('SelectObject(dc,small);','SelectObject(dc,fontSmall);')
+          $s=$s.Replace('DeleteObject(small);','DeleteObject(fontSmall);')
+          Set-Content $p $s -Encoding UTF8
+
           $p='native\src\export.cpp'
           $s=(Get-Content $p -Raw).Replace('gr.Clear(Color::White);','gr.Clear(Color(255,255,255,255));')
+          $s=$s.Replace('gr.DrawRectangle(&border,x,noteY,cw,notesH);','gr.DrawRectangle(&border,RectF(x,noteY,cw,(REAL)notesH));')
           Set-Content $p $s -Encoding UTF8
 
           $p='native\src\app.rc'

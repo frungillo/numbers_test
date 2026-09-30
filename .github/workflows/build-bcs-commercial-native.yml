@@ -1,0 +1,146 @@
+name: Build Basket Coach Studio Commercial Native
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - basket-coach-studio-commercial-native-1.0.0
+    paths:
+      - 'commercial_native_src/**'
+      - '.github/workflows/build-bcs-commercial-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore source package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = Get-ChildItem commercial_native_src\part* | Sort-Object Name
+          if ($parts.Count -ne 6) { throw "Expected 6 source chunks, found $($parts.Count)" }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('source.zip',[Convert]::FromBase64String($b64))
+          Expand-Archive source.zip -DestinationPath native -Force
+          if (-not (Test-Path native\src\main.cpp)) { throw "Source restore failed" }
+
+      - name: Apply release fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p='native\src\app.h'
+          $s=Get-Content $p -Raw
+          if ($s -notmatch 'NOMINMAX') {
+            $s=$s -replace [regex]::Escape("#pragma once`r`n"), "#pragma once`r`n#ifndef NOMINMAX`r`n#define NOMINMAX`r`n#endif`r`n"
+          }
+          if ($s -notmatch '#include <windowsx.h>') { $s=$s -replace '#include <windows.h>', "#include <windows.h>`r`n#include <windowsx.h>" }
+          foreach($inc in @('cstring','locale','iterator')) {
+            if ($s -notmatch "#include <$inc>") { $s=$s -replace '#include <memory>', "#include <memory>`r`n#include <$inc>" }
+          }
+          Set-Content $p $s -Encoding UTF8
+
+          $p='native\src\main.cpp'
+          $s=Get-Content $p -Raw
+          $s=$s.Replace("static std::wstring GetText(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n,L'\0');GetWindowTextW(h,s.data(),n+1);return s;}",
+                        "static std::wstring GetText(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,L'\0');GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}")
+          $s=$s.Replace('case WM_CREATE:CreateControls(w);return 0;','case WM_CREATE:g.hwnd=w;CreateControls(w);return 0;')
+          Set-Content $p $s -Encoding UTF8
+
+          $p='native\src\export.cpp'
+          $s=(Get-Content $p -Raw).Replace('gr.Clear(Color::White);','gr.Clear(Color(255,255,255,255));')
+          Set-Content $p $s -Encoding UTF8
+
+          $p='native\src\app.rc'
+          $s=(Get-Content $p -Raw).Replace('1 RT_MANIFEST "../assets/app.manifest"','1 24 "../assets/app.manifest"')
+          Set-Content $p $s -Encoding UTF8
+
+      - name: Locate Visual C++ toolchain
+        shell: pwsh
+        run: |
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs=& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw "Visual C++ Build Tools not found" }
+          "VCVARS=$vs\VC\Auxiliary\Build\vcvars64.bat" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compile native application
+        shell: cmd
+        run: |
+          call "%VCVARS%"
+          if not exist build mkdir build
+          if not exist dist mkdir dist
+          cd /d "%GITHUB_WORKSPACE%\native\src"
+          rc /nologo /fo "%GITHUB_WORKSPACE%\build\app.res" app.rc
+          cl /nologo /std:c++17 /EHsc /O2 /MT /utf-8 /DUNICODE /D_UNICODE main.cpp model.cpp drawing.cpp export.cpp splash.cpp "%GITHUB_WORKSPACE%\build\app.res" /Fe:"%GITHUB_WORKSPACE%\dist\BasketCoachStudio.exe" /link /SUBSYSTEM:WINDOWS
+          if errorlevel 1 exit /b 1
+
+      - name: Build installer resources
+        shell: pwsh
+        run: |
+          @'
+          #define IDI_APP 101
+          #define IDR_APP 201
+          #define IDR_LICENSE 202
+          #define IDR_README 203
+          IDI_APP ICON "../native/assets/basketcoach.ico"
+          IDR_APP RCDATA "../dist/BasketCoachStudio.exe"
+          IDR_LICENSE RCDATA "../native/LICENSE.txt"
+          IDR_README RCDATA "../native/README.txt"
+          1 24 "../native/assets/app.manifest"
+          '@ | Set-Content build\installer.rc -Encoding ASCII
+
+      - name: Compile native installer
+        shell: cmd
+        run: |
+          call "%VCVARS%"
+          cd /d "%GITHUB_WORKSPACE%\build"
+          rc /nologo /fo installer.res installer.rc
+          cd /d "%GITHUB_WORKSPACE%"
+          cl /nologo /std:c++17 /EHsc /O2 /MT /utf-8 /DUNICODE /D_UNICODE native\src\installer.cpp build\installer.res /Fe:dist\BasketCoachStudio_Setup_CommercialNative_1.0.0.exe /link /SUBSYSTEM:WINDOWS
+          if errorlevel 1 exit /b 1
+
+      - name: Verify binaries and dependencies
+        shell: cmd
+        run: |
+          call "%VCVARS%"
+          if not exist dist\BasketCoachStudio.exe exit /b 2
+          if not exist dist\BasketCoachStudio_Setup_CommercialNative_1.0.0.exe exit /b 3
+          echo ===== APP DEPENDENCIES =====
+          dumpbin /dependents dist\BasketCoachStudio.exe
+          echo ===== INSTALLER DEPENDENCIES =====
+          dumpbin /dependents dist\BasketCoachStudio_Setup_CommercialNative_1.0.0.exe
+
+      - name: Smoke test startup
+        shell: pwsh
+        run: |
+          $p=Start-Process -FilePath .\dist\BasketCoachStudio.exe -PassThru
+          Start-Sleep -Seconds 3
+          if ($p.HasExited -and $p.ExitCode -ne 0) { throw "Application exited with code $($p.ExitCode)" }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Write-Host "Native app startup smoke test passed"
+
+      - name: Package commercial release
+        shell: pwsh
+        run: |
+          Copy-Item native\README.txt dist\README.txt
+          Copy-Item native\LICENSE.txt dist\LICENSE.txt
+          Copy-Item native\docs\COMPLIANCE.md dist\COMPLIANCE.md
+          Compress-Archive -Path native\* -DestinationPath dist\BasketCoachStudio_CommercialNative_1.0.0_Source.zip -Force
+          Get-FileHash dist\BasketCoachStudio.exe -Algorithm SHA256 | Format-List | Out-File dist\SHA256.txt
+          Get-FileHash dist\BasketCoachStudio_Setup_CommercialNative_1.0.0.exe -Algorithm SHA256 | Format-List | Out-File dist\SHA256_Installer.txt
+          Get-ChildItem dist | Select-Object Name,Length
+
+      - name: Upload commercial release
+        uses: actions/upload-artifact@v4
+        with:
+          name: BasketCoachStudio-CommercialNative-1.0.0
+          path: dist/**
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
